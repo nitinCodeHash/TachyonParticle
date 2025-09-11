@@ -22,8 +22,16 @@ class QdrantVectorDB:
     def embed_chunks(self, chunks):
         return self.embedder.embed_documents(chunks)
 
-    def save_index(self, doc_name, embeddings, chunks):
-        metadatas = [{"doc_name": doc_name} for _ in chunks]
+    def save_index(self, doc_name, embeddings, chunks, chunk_metadata=None):
+        # chunk_metadata: list of dicts, one per chunk, or None
+        metadatas = []
+        if chunk_metadata and len(chunk_metadata) == len(chunks):
+            for meta in chunk_metadata:
+                m = {"doc_name": doc_name}
+                m.update(meta)
+                metadatas.append(m)
+        else:
+            metadatas = [{"doc_name": doc_name} for _ in chunks]
         self.lc_qdrant.add_texts(texts=chunks, metadatas=metadatas)
 
     def search(self, doc_name, query, top_k=3):

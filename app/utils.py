@@ -1,11 +1,19 @@
+import json
+
 import os
 import hashlib
 from fastapi import UploadFile, HTTPException
 from typing import Any
 from PIL import Image
 from app.helpers.ocr import ocr_image
+from app.rag_file_types.pdf_handler import extract_metadata as extract_pdf_metadata, is_pdf
+from app.rag_file_types.docx_handler import extract_metadata as extract_docx_metadata, is_docx
+from app.rag_file_types.txt_handler import extract_metadata as extract_txt_metadata, is_txt
+from app.rag_file_types.image_handler import extract_metadata as extract_image_metadata, is_image
 from PyPDF2 import PdfReader
 from docx import Document
+
+
 
 def validate_file(file: UploadFile):
     allowed_types = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain", "image/png", "image/jpeg"]
@@ -50,3 +58,16 @@ def extract_text_from_file(file_path: str) -> str:
         return text
     else:
         raise HTTPException(status_code=400, detail="Unsupported file extension for text extraction.")
+
+
+def extract_metadata_from_file(file_path: str) -> dict:
+    if is_pdf(file_path):
+        return extract_pdf_metadata(file_path)
+    elif is_docx(file_path):
+        return extract_docx_metadata(file_path)
+    elif is_txt(file_path):
+        return extract_txt_metadata(file_path)
+    elif is_image(file_path):
+        return extract_image_metadata(file_path)
+    else:
+        return {"author": None, "title": None, "creation_date": None}
