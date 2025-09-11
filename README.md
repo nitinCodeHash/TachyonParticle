@@ -60,6 +60,7 @@ This project is a Retrieval-Augmented Generation (RAG) backend built with Python
 - Create uploaded_docs folder in app folder
 - EasyOCR, pytesseract (OCR)
 - LiteLLM (LLM abstraction)
+- Create uploaded_docs folder in app folder
 
 ---
 For more details, see the code and endpoint docs at `/docs` (Swagger UI).
