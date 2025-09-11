@@ -1,0 +1,5 @@
+.env
+uploaded_docs
+.venv
+.github
+__pycache__
