@@ -10,12 +10,14 @@ from app.utils import (
     save_file,
     extract_text_from_file,
     get_file_md5,
-    is_file_unique
+    is_file_unique,
+    extract_metadata_from_file
 )
 from app.vectordb import vectordb
 from app.db import add_document_meta, get_document_meta, SessionLocal, DocumentMeta
 
 from app.litellm_client import litellm_client
+import logging
 
 app = FastAPI()
 UPLOAD_DIR = "uploaded_docs"
@@ -39,17 +41,22 @@ async def ingest_document(
         raise HTTPException(status_code=400, detail="Duplicate file detected.")
     file_path = save_file(file, file_bytes, UPLOAD_DIR)
     text = extract_text_from_file(file_path)
+    # Extract metadata for PDF/DOCX
+    metadata = extract_metadata_from_file(file_path)
     # Chunk and embed using vectordb with custom params
     chunks = vectordb.chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     embeddings = vectordb.embed_chunks(chunks)
     doc_name = os.path.splitext(file.filename)[0]
-    vectordb.save_index(doc_name, embeddings, chunks)
-    # Store metadata in SQLite
-    add_document_meta(file.filename, file_md5, file.content_type, "indexed", extra=None)
+    # Pass metadata for each chunk
+    chunk_metadata = [metadata for _ in chunks]
+    vectordb.save_index(doc_name, embeddings, chunks, chunk_metadata=chunk_metadata)
+    # Store metadata in SQLite (as JSON in extra)
+    import json
+    add_document_meta(file.filename, file_md5, file.content_type, "indexed", extra=json.dumps(metadata))
     # Optionally save extracted text
     with open(f"{file_path}.txt", "w", encoding="utf-8") as f:
         f.write(text)
-    return {"filename": file.filename, "md5": file_md5, "chunks": len(chunks), "status": "ingested and indexed", "chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
+    return {"filename": file.filename, "md5": file_md5, "chunks": len(chunks), "status": "ingested and indexed", "chunk_size": chunk_size, "chunk_overlap": chunk_overlap, "metadata": metadata}
 
 
 # Create a new chat session
@@ -96,7 +103,7 @@ async def ask_question(
 ):
     # Now document_name is the full filename with extension
     meta = get_document_meta(document_name)
-    import logging
+    
     logging.info(f"Document metadata: {meta}")
     if not meta:
         return {"answer": "Document not found or not indexed."}
@@ -119,6 +126,7 @@ from fastapi import status
     description="List all uploaded documents and their metadata."
 )
 def list_files():
+    import json
     db = SessionLocal()
     files = db.query(DocumentMeta).all()
     db.close()
@@ -128,7 +136,7 @@ def list_files():
             "md5": f.md5,
             "filetype": f.filetype,
             "status": f.status,
-            "extra": f.extra
+            "metadata": json.loads(f.extra) if f.extra else None
         } for f in files
     ]
 
