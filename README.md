@@ -57,6 +57,7 @@ This project is a Retrieval-Augmented Generation (RAG) backend built with Python
 - SQLAlchemy (SQLite metadata)
 - Qdrant-client (vector DB)
 - LangChain, sentence-transformers (embedding, chunking)
+- Create uploaded_docs folder in app folder
 - EasyOCR, pytesseract (OCR)
 - LiteLLM (LLM abstraction)
 
