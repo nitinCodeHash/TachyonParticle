@@ -18,13 +18,28 @@ class LiteLLMClient:
             self.api_key = api_key
         self.model = model or LITELLM_MODEL
 
-    def ask(self, question: str, context: str = "", system_prompt: str = None) -> str:
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        if context:
-            messages.append({"role": "user", "content": f"Context: {context}"})
-        messages.append({"role": "user", "content": question})
+    def ask(self, question: str = None, context: str = "", system_prompt: str = None, messages: list = None) -> str:
+        if messages is not None:
+            payload = messages
+        else:
+            payload = []
+            if system_prompt:
+                payload.append({"role": "system", "content": system_prompt})
+            if context:
+                payload.append({"role": "user", "content": f"Context: {context}"})
+            if question is not None:
+                payload.append({"role": "user", "content": question})
+        response = litellm.completion(
+            model=self.model,
+            messages=payload,
+            api_key=self.api_key,
+            max_tokens=512,
+            temperature=0.2
+        )
+        return response['choices'][0]['message']['content'].strip()
+
+    def ask_multimodal(self, messages) -> str:
+        # For multimodal models like GPT-4 Vision, Gemini Vision, etc.
         response = litellm.completion(
             model=self.model,
             messages=messages,

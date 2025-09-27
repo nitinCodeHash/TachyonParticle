@@ -1,5 +1,17 @@
+from app.chat_utils import ChatMessageBuilder
+from app.image_chat import chat_with_image
+
 # Chat session and chat endpoints
-from app.db import create_chat_session, add_chat_message, get_last_messages
+from app.db import (
+    create_chat_session,
+    save_user_message,
+    save_assistant_message,
+    get_last_n_messages,
+    get_session_or_create,
+    get_all_sessions,
+    get_session_files,
+    get_session_model
+)
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse
 from typing import List, Optional
@@ -31,7 +43,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 async def ingest_document(
     file: UploadFile = File(..., description="Document file to upload (PDF, DOCX, TXT, or image)"),
     chunk_size: int = 500,
-    chunk_overlap: int = 50
+    chunk_overlap: int = 50,
+    session_id: Optional[str] = Form(None, description="Session ID to associate this file with (optional)")
 ):
     """Ingest a document with optional chunking parameters."""
     validate_file(file)
@@ -52,6 +65,8 @@ async def ingest_document(
     vectordb.save_index(doc_name, embeddings, chunks, chunk_metadata=chunk_metadata)
     # Store metadata in SQLite (as JSON in extra)
     import json
+    if session_id:
+        metadata["session_id"] = session_id
     add_document_meta(file.filename, file_md5, file.content_type, "indexed", extra=json.dumps(metadata))
     # Optionally save extracted text
     with open(f"{file_path}.txt", "w", encoding="utf-8") as f:
@@ -63,11 +78,39 @@ async def ingest_document(
 @app.post(
     "/chat/session",
     summary="Create chat session",
-    description="Create a new chat session for multi-turn conversations. Returns a session ID."
+    description="Create a new chat session for multi-turn conversations. Select model for this session. Returns a session ID."
 )
-def create_session():
-    session_id = create_chat_session()
-    return {"session_id": session_id}
+def create_session(model_name: str = Form(..., description="Model name to use for this session (e.g., gpt-4-vision-preview)")):
+    session_id = create_chat_session(model_name)
+    return {"session_id": session_id, "model_name": model_name}
+# List all chat sessions
+@app.get(
+    "/chat/sessions",
+    summary="List all chat sessions",
+    description="Get all chat sessions with their creation time and model."
+)
+def list_sessions():
+    return get_all_sessions()
+# List/download/view files for a session
+@app.get(
+    "/chat/session/{session_id}/files",
+    summary="List files for a session",
+    description="List all files uploaded or created in a chat session."
+)
+def list_session_files(session_id: str):
+    return {"files": get_session_files(session_id)}
+
+@app.get(
+    "/chat/session/{session_id}/file/{filename}",
+    summary="Download/view a file from session",
+    description="Download or view a file uploaded/created in a session."
+)
+def get_session_file(session_id: str, filename: str):
+    file_path = os.path.join(UPLOAD_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found.")
+    from fastapi.responses import FileResponse
+    return FileResponse(file_path, filename=filename)
 
 # Chat with LLM using session and history
 from fastapi import Body
@@ -81,15 +124,14 @@ def chat_with_llm(
     session_id: str = Body(..., embed=True, description="Session ID from /chat/session"),
     message: str = Body(..., embed=True, description="User message to send to the LLM")
 ):
-    # Save user message
-    add_chat_message(session_id, "user", message)
-    # Get last 10 messages for context
-    history = get_last_messages(session_id, limit=10)
-    context = "\n".join([f"{m.role}: {m.message}" for m in history if m.role == "user" or m.role == "assistant"])
-    # Get LLM response
-    answer = litellm_client.ask(message, context=context)
-    # Save assistant message
-    add_chat_message(session_id, "assistant", answer)
+    session_id = get_session_or_create(session_id)
+    save_user_message(session_id, message)
+    history = get_last_n_messages(session_id)
+    messages = ChatMessageBuilder.build_messages(history, user_message=message)
+    model_name = get_session_model(session_id)
+    llm = litellm_client.__class__(model=model_name) if model_name else litellm_client
+    answer = llm.ask(messages=messages)
+    save_assistant_message(session_id, answer)
     return {"answer": answer, "session_id": session_id, "history": [{"role": m.role, "message": m.message} for m in history]}
 
 @app.post(
@@ -99,22 +141,27 @@ def chat_with_llm(
 )
 async def ask_question(
     document_name: str = Form(..., description="Filename of the uploaded document (with extension)"),
-    question: str = Form(..., description="Question to ask about the document")
+    question: str = Form(..., description="Question to ask about the document"),
+    session_id: Optional[str] = Form(None, description="Session ID for chat history (optional)")
 ):
-    # Now document_name is the full filename with extension
+    session_id = get_session_or_create(session_id)
+    save_user_message(session_id, question)
     meta = get_document_meta(document_name)
-    
     logging.info(f"Document metadata: {meta}")
     if not meta:
         return {"answer": "Document not found or not indexed."}
-    # Use ChromaDB for semantic search (use base name without extension for doc_name)
     doc_base = os.path.splitext(document_name)[0]
     results = vectordb.search(doc_base, question, top_k=3)
     if not results:
         return {"answer": "No relevant content found."}
-    context = "\n".join(results)
-    answer = litellm_client.ask(question, context=context)
-    return {"answer": answer, "context": results}
+    history = get_last_n_messages(session_id)
+    semantic_context = "\n".join(results)
+    messages = ChatMessageBuilder.build_messages(history, user_message=question, semantic_context=semantic_context)
+    model_name = get_session_model(session_id)
+    llm = litellm_client.__class__(model=model_name) if model_name else litellm_client
+    answer = llm.ask(messages=messages)
+    save_assistant_message(session_id, answer)
+    return {"answer": answer, "context": results, "session_id": session_id, "history": [{"role": m.role, "message": m.message} for m in history]}
 
 
 from fastapi import status
@@ -169,3 +216,30 @@ def delete_file(filename: str):
     db.commit()
     db.close()
     return
+
+
+@app.post(
+    "/chat/image",
+    summary="Chat with an image",
+    description="Upload an image and ask a question about it. Uses a multimodal LLM (e.g., GPT-4 Vision) to analyze the image and answer."
+)
+async def chat_image(
+    image: UploadFile = File(..., description="Image file (PNG, JPG, JPEG)"),
+    question: str = Form(..., description="Question to ask about the image"),
+    provider: str = Form("openai", description="LLM provider (e.g., openai, gemini)"),
+    session_id: Optional[str] = Form(None, description="Session ID for chat history (optional)")
+):
+    try:
+        session_id = get_session_or_create(session_id)
+        save_user_message(session_id, question)
+        history = get_last_n_messages(session_id)
+        model_name = get_session_model(session_id)
+        from app.litellm_client import LiteLLMClient
+        llm = LiteLLMClient(model=model_name) if model_name else litellm_client
+        messages = ChatMessageBuilder.build_messages(history, user_message=question)
+        answer = chat_with_image(image, messages=messages, provider=provider, llm=llm)
+        save_assistant_message(session_id, answer)
+        return {"answer": answer, "session_id": session_id, "history": [{"role": m.role, "message": m.message} for m in history]}
+    except Exception as e:
+        logging.error(f"Image chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

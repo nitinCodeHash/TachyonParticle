@@ -1,7 +1,9 @@
 
+
 # FastAPI RAG System
 
-This project is a Retrieval-Augmented Generation (RAG) backend built with Python and FastAPI. It provides robust API endpoints for document ingestion (PDF, DOCX, TXT, images with OCR), semantic search, and chat-based question answering using LLMs (OpenAI, Gemini, etc.) via LiteLLM.
+This project is a Retrieval-Augmented Generation (RAG) backend built with Python and FastAPI. It provides robust API endpoints for document ingestion (PDF, DOCX, TXT, images with OCR), semantic search, and chat-based question answering using LLMs (OpenAI, Gemini, etc.) via LiteLLM. The system supports session-based model selection, robust chat history, and multimodal (text+image) chat with centralized message construction for maintainability.
+
 
 ## Features
 - Document ingestion with validation (file name, md5, uniqueness, type, etc.)
@@ -10,14 +12,19 @@ This project is a Retrieval-Augmented Generation (RAG) backend built with Python
 - Persistent vector storage (Qdrant)
 - Semantic search and retrieval
 - Chat API with session/history and context window
+- Session-based model selection for chat
+- Centralized message construction for all endpoints (maintainable, robust)
+- Multimodal chat: text + image support (GPT-4 Vision, Gemini, etc.)
 - Modular LLM backend via LiteLLM (OpenAI, Gemini, etc.)
 - File management endpoints (list, delete)
+
 
 ## Endpoints
 - `POST /ingest`: Upload and ingest documents (PDF, DOCX, TXT, or image; OCR for images; supports chunk_size and chunk_overlap params)
 - `POST /ask`: Ask a question about an uploaded document (semantic search + LLM answer)
-- `POST /chat/session`: Create a new chat session (returns session_id)
+- `POST /chat/session`: Create a new chat session (returns session_id, supports model selection)
 - `POST /chat`: Chat with LLM using session and history (multi-turn, context-aware)
+- `POST /chat/image`: Chat with an image (multimodal LLM, e.g., GPT-4 Vision)
 - `GET /files`: List all uploaded files and metadata
 - `DELETE /files/{filename}`: Delete a file, its metadata, and all vectors
 
@@ -42,25 +49,29 @@ This project is a Retrieval-Augmented Generation (RAG) backend built with Python
    uvicorn app.main:app --reload
    ```
 
+
 ## Environment Variables
 - `OPENAI_API_KEY`: Your OpenAI API key (for OpenAI models)
 - `GEMINI_API_KEY`: Your Gemini API key (for Gemini models)
 - `LITELLM_MODEL`: (Optional) Default LLM model name (e.g., gpt-3.5-turbo)
 
+
 ## Notes
 - Ensure Tesseract is installed for OCR support (for EasyOCR)
 - Qdrant runs in local file mode by default (no external server needed)
 - All LLM calls are routed through LiteLLM for easy provider/model swap
+- All chat and multimodal endpoints use centralized message construction for maintainability and context consistency
+
 
 ## Major Dependencies
 - FastAPI, Uvicorn
 - SQLAlchemy (SQLite metadata)
 - Qdrant-client (vector DB)
 - LangChain, sentence-transformers (embedding, chunking)
-- Create uploaded_docs folder in app folder
 - EasyOCR, pytesseract (OCR)
 - LiteLLM (LLM abstraction)
-- Create uploaded_docs folder in app folder
+- All uploads stored in `uploaded_docs` folder
 
 ---
+
 For more details, see the code and endpoint docs at `/docs` (Swagger UI).

@@ -9,7 +9,12 @@ def extract_metadata(file_path: str) -> dict:
         if doc_info:
             metadata["author"] = getattr(doc_info, 'author', None) or doc_info.get('/Author')
             metadata["title"] = getattr(doc_info, 'title', None) or doc_info.get('/Title')
-            metadata["creation_date"] = getattr(doc_info, 'creation_date', None) or doc_info.get('/CreationDate')
+            # Ensure creation_date is always a string
+            creation_date = getattr(doc_info, 'creation_date', None) or doc_info.get('/CreationDate')
+            if creation_date is not None:
+                metadata["creation_date"] = str(creation_date)
+            else:
+                metadata["creation_date"] = None
     except Exception:
         pass
     return metadata
